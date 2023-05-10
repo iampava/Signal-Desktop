@@ -696,21 +696,27 @@ export default class MessageSender {
 
   async getStoryMessage({
     allowsReplies,
+    bodyRanges,
     fileAttachment,
     groupV2,
     profileKey,
     textAttachment,
   }: {
     allowsReplies?: boolean;
+    bodyRanges?: Array<RawBodyRange>;
     fileAttachment?: UploadedAttachmentType;
     groupV2?: GroupV2InfoType;
     profileKey: Uint8Array;
     textAttachment?: OutgoingTextAttachmentType;
   }): Promise<Proto.StoryMessage> {
     const storyMessage = new Proto.StoryMessage();
+
     storyMessage.profileKey = profileKey;
 
     if (fileAttachment) {
+      if (bodyRanges) {
+        storyMessage.bodyRanges = bodyRanges;
+      }
       try {
         storyMessage.fileAttachment = fileAttachment;
       } catch (error) {
@@ -1378,30 +1384,6 @@ export default class MessageSender {
     };
   }
 
-  static getRequestPniIdentitySyncMessage(): SingleProtoJobData {
-    const myUuid = window.textsecure.storage.user.getCheckedUuid();
-
-    const request = new Proto.SyncMessage.Request();
-    request.type = Proto.SyncMessage.Request.Type.PNI_IDENTITY;
-    const syncMessage = this.createSyncMessage();
-    syncMessage.request = request;
-    const contentMessage = new Proto.Content();
-    contentMessage.syncMessage = syncMessage;
-
-    const { ContentHint } = Proto.UnidentifiedSenderMessage.Message;
-
-    return {
-      contentHint: ContentHint.RESENDABLE,
-      identifier: myUuid.toString(),
-      isSyncMessage: true,
-      protoBase64: Bytes.toBase64(
-        Proto.Content.encode(contentMessage).finish()
-      ),
-      type: 'pniIdentitySyncRequest',
-      urgent: true,
-    };
-  }
-
   static getFetchManifestSyncMessage(): SingleProtoJobData {
     const myUuid = window.textsecure.storage.user.getCheckedUuid();
 
@@ -2021,8 +2003,13 @@ export default class MessageSender {
         ? Proto.DataMessage.encode(proto.dataMessage).finish()
         : undefined;
 
+      const editMessage = proto.editMessage
+        ? Proto.EditMessage.encode(proto.editMessage).finish()
+        : undefined;
+
       return Promise.resolve({
         dataMessage,
+        editMessage,
         errors: [],
         failoverIdentifiers: [],
         successfulIdentifiers: [],

@@ -89,6 +89,7 @@ import { strictAssert } from '../../util/assert';
 import { makeQuote } from '../../util/makeQuote';
 import { sendEditedMessage as doSendEditedMessage } from '../../util/sendEditedMessage';
 import { maybeBlockSendForFormattingModal } from '../../util/maybeBlockSendForFormattingModal';
+import { Sound, SoundType } from '../../util/Sound';
 
 // State
 // eslint-disable-next-line local-rules/type-alias-readonlydeep
@@ -616,6 +617,10 @@ function sendMultiMediaMessage(
               );
               dispatch(incrementSendCounter(conversationId));
               dispatch(setComposerDisabledState(conversationId, false));
+
+              if (state.items.audioMessage) {
+                drop(new Sound({ soundType: SoundType.Whoosh }).play());
+              }
             },
           }
         );
@@ -708,6 +713,11 @@ export function setQuoteByMessageId(
       throw new Error('sendStickerMessage: No conversation found');
     }
 
+    const draftEditMessage = conversation.get('draftEditMessage');
+    if (draftEditMessage) {
+      return;
+    }
+
     const message = messageId ? await getMessageById(messageId) : undefined;
     const state = getState();
 
@@ -747,7 +757,6 @@ export function setQuoteByMessageId(
       window.Signal.Data.updateConversation(conversation.attributes);
     }
 
-    const draftEditMessage = conversation.get('draftEditMessage');
     if (message) {
       const quote = await makeQuote(message.attributes);
 
@@ -756,31 +765,15 @@ export function setQuoteByMessageId(
         return;
       }
 
-      if (draftEditMessage) {
-        conversation.set({
-          draftEditMessage: {
-            ...draftEditMessage,
-            quote,
-          },
-        });
-      } else {
-        dispatch(
-          setQuotedMessage(conversationId, {
-            conversationId,
-            quote,
-          })
-        );
-      }
+      dispatch(
+        setQuotedMessage(conversationId, {
+          conversationId,
+          quote,
+        })
+      );
 
       dispatch(setComposerFocus(conversation.id));
       dispatch(setComposerDisabledState(conversationId, false));
-    } else if (draftEditMessage) {
-      conversation.set({
-        draftEditMessage: {
-          ...draftEditMessage,
-          quote: undefined,
-        },
-      });
     } else {
       dispatch(setQuotedMessage(conversationId, undefined));
     }

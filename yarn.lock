@@ -2289,10 +2289,10 @@
     ws "^8.4.2"
     zod "^3.20.2"
 
-"@signalapp/ringrtc@2.26.2":
-  version "2.26.2"
-  resolved "https://registry.yarnpkg.com/@signalapp/ringrtc/-/ringrtc-2.26.2.tgz#6ca91cd4b2d3ed545eb87c4aaddcb3f8735ad85a"
-  integrity sha512-Z80SrSuZl8EufG5cS6PEKo+vYYTKQ6mXD7Ybc1L8ambIYf2PsmLDI++ZN+NsEQVFXPQr9nwie/oQJGi145ffLQ==
+"@signalapp/ringrtc@2.26.4":
+  version "2.26.4"
+  resolved "https://registry.yarnpkg.com/@signalapp/ringrtc/-/ringrtc-2.26.4.tgz#0d0e4ee9f7afc93d951a27ab3d23b53a4b9ab76a"
+  integrity sha512-1j/EzqIUPisPd6cKBGIuNCYCoWUxeD7gclXxbDq5Fyq17Bi3MNF7EogTD9SCgQr8lcvB50ucV0jnMXjczVcZhg==
   dependencies:
     tar "^6.1.0"
 
@@ -9487,11 +9487,6 @@ focus-trap@^6.7.1:
   integrity sha512-a6czHbT9twVpy2RpkWQA9vIgwQgB9Nx1PIxNNUxQT4nugG/3QibwxO+tWTh9i+zSY2SFiX4pnYhTaFaQF/6ZAg==
   dependencies:
     tabbable "^5.2.1"
-
-focusable-selectors@0.8.0:
-  version "0.8.0"
-  resolved "https://registry.yarnpkg.com/focusable-selectors/-/focusable-selectors-0.8.0.tgz#aecfd7ce2ac369fd808289d4bcf474ac2bf03562"
-  integrity sha512-lKyq/Cth8mTEzJk2CLHLdMDYl2zmMicQflfrUMs0CZ3Boc5Ca/63d7z+GgKV3nKm79KqrPtCWrwTdoV9RTjVCA==
 
 follow-redirects@^1.0.0:
   version "1.14.9"

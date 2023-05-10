@@ -88,6 +88,7 @@ import type {
   ErrorEvent,
   FetchLatestEvent,
   GroupEvent,
+  InvalidPlaintextEvent,
   KeysEvent,
   MessageEvent,
   MessageEventData,
@@ -140,7 +141,11 @@ import * as Conversation from './types/Conversation';
 import * as Stickers from './types/Stickers';
 import * as Errors from './types/errors';
 import { SignalService as Proto } from './protobuf';
-import { onRetryRequest, onDecryptionError } from './util/handleRetry';
+import {
+  onRetryRequest,
+  onDecryptionError,
+  onInvalidPlaintextMessage,
+} from './util/handleRetry';
 import { themeChanged } from './shims/themeChanged';
 import { createIPCEvents } from './util/createIPCEvents';
 import { RemoveAllConfiguration } from './types/RemoveAllConfiguration';
@@ -175,7 +180,7 @@ import { StartupQueue } from './util/StartupQueue';
 import { showConfirmationDialog } from './util/showConfirmationDialog';
 import { onCallEventSync } from './util/onCallEventSync';
 import { sleeper } from './util/sleeper';
-import { MINUTE } from './util/durations';
+import { DAY, HOUR, MINUTE } from './util/durations';
 import { copyDataMessageIntoMessage } from './util/copyDataMessageIntoMessage';
 import {
   flushMessageCounter,
@@ -186,9 +191,9 @@ import { RetryPlaceholders } from './util/retryPlaceholders';
 import { setBatchingStrategy } from './util/messageBatcher';
 import { parseRemoteClientExpiration } from './util/parseRemoteClientExpiration';
 import { makeLookup } from './util/makeLookup';
+import { focusableSelectors } from './util/focusableSelectors';
 
 export function isOverHourIntoPast(timestamp: number): boolean {
-  const HOUR = 1000 * 60 * 60;
   return isNumber(timestamp) && isOlderThan(timestamp, HOUR);
 }
 
@@ -391,6 +396,14 @@ export async function startApp(): Promise<void> {
       })
     );
     messageReceiver.addEventListener(
+      'invalid-plaintext',
+      queuedEventListener((event: InvalidPlaintextEvent): void => {
+        drop(
+          onDecryptionErrorQueue.add(() => onInvalidPlaintextMessage(event))
+        );
+      })
+    );
+    messageReceiver.addEventListener(
       'retry-request',
       queuedEventListener((event: RetryRequestEvent): void => {
         drop(onRetryRequestQueue.add(() => onRetryRequest(event)));
@@ -542,19 +555,6 @@ export async function startApp(): Promise<void> {
   );
 
   startInteractionMode();
-
-  // Load these images now to ensure that they don't flicker on first use
-  window.preloadedImages = [];
-  function preload(list: ReadonlyArray<string>) {
-    for (let index = 0, max = list.length; index < max; index += 1) {
-      const image = new Image();
-      image.src = `./images/${list[index]}`;
-      window.preloadedImages.push(image);
-    }
-  }
-
-  const builtInImages = await window.IPC.getBuiltInImages();
-  preload(builtInImages);
 
   // We add this to window here because the default Node context is erased at the end
   //   of preload.js processing
@@ -944,12 +944,6 @@ export async function startApp(): Promise<void> {
       void window.Signal.Data.ensureFilePermissions();
     }
 
-    try {
-      await window.Signal.Data.startInRendererProcess();
-    } catch (err) {
-      log.error('SQL failed to initialize', Errors.toLogFormat(err));
-    }
-
     setAppLoadingScreenMessage(window.i18n('icu:loading'), window.i18n);
 
     let isMigrationWithIndexComplete = false;
@@ -1007,27 +1001,13 @@ export async function startApp(): Promise<void> {
 
     void window.Signal.RemoteConfig.initRemoteConfig(server);
 
-    let retryReceiptLifespan: number | undefined;
-    try {
-      retryReceiptLifespan = parseIntOrThrow(
-        window.Signal.RemoteConfig.getValue('desktop.retryReceiptLifespan'),
-        'retryReceiptLifeSpan'
-      );
-    } catch (error) {
-      log.warn(
-        'Failed to parse integer out of desktop.retryReceiptLifespan feature flag'
-      );
-    }
-
     const retryPlaceholders = new RetryPlaceholders({
-      retryReceiptLifespan,
+      retryReceiptLifespan: HOUR,
     });
     window.Signal.Services.retryPlaceholders = retryPlaceholders;
 
     setInterval(async () => {
       const now = Date.now();
-      const HOUR = 1000 * 60 * 60;
-      const DAY = 24 * HOUR;
       let sentProtoMaxAge = 14 * DAY;
 
       try {
@@ -1358,27 +1338,16 @@ export async function startApp(): Promise<void> {
         return;
       }
 
-      // Navigate by section
-      if (commandOrCtrl && !shiftKey && (key === 't' || key === 'T')) {
+      // Super tab :)
+      if (
+        (commandOrCtrl && key === 'F6') ||
+        (commandOrCtrl && !shiftKey && (key === 't' || key === 'T'))
+      ) {
         window.enterKeyboardMode();
         const focusedElement = document.activeElement;
-
-        const targets: Array<HTMLElement | null> = [
-          document.querySelector('.module-main-header .module-avatar-button'),
-          document.querySelector(
-            '.module-left-pane__header__contents__back-button'
-          ),
-          document.querySelector('.LeftPaneSearchInput__input'),
-          document.querySelector('.module-main-header__compose-icon'),
-          document.querySelector(
-            '.module-left-pane__compose-search-form__input'
-          ),
-          document.querySelector(
-            '.module-conversation-list__item--contact-or-conversation'
-          ),
-          document.querySelector('.module-search-results'),
-          document.querySelector('.CompositionArea .ql-editor'),
-        ];
+        const targets: Array<HTMLElement> = Array.from(
+          document.querySelectorAll('[data-supertab="true"]')
+        );
         const focusedIndex = targets.findIndex(target => {
           if (!target || !focusedElement) {
             return false;
@@ -1394,24 +1363,48 @@ export async function startApp(): Promise<void> {
 
           return false;
         });
+
         const lastIndex = targets.length - 1;
+        const increment = shiftKey ? -1 : 1;
 
         let index;
         if (focusedIndex < 0 || focusedIndex >= lastIndex) {
           index = 0;
         } else {
-          index = focusedIndex + 1;
+          index = focusedIndex + increment;
         }
 
         while (!targets[index]) {
-          index += 1;
-          if (index > lastIndex) {
+          index += increment;
+          if (index > lastIndex || index < 0) {
             index = 0;
           }
         }
 
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        targets[index]!.focus();
+        const node = targets[index];
+        const firstFocusableElement = node.querySelectorAll<HTMLElement>(
+          focusableSelectors.join(',')
+        )[0];
+
+        if (firstFocusableElement) {
+          firstFocusableElement.focus();
+        } else {
+          const nodeInfo = Array.from(node.attributes)
+            .map(attr => `${attr.name}=${attr.value}`)
+            .join(',');
+          log.warn(
+            `supertab: could not find focus for DOM node ${node.nodeName}<${nodeInfo}>`
+          );
+          window.enterMouseMode();
+          const { activeElement } = document;
+          if (
+            activeElement &&
+            'blur' in activeElement &&
+            typeof activeElement.blur === 'function'
+          ) {
+            activeElement.blur();
+          }
+        }
       }
 
       // Cancel out of keyboard shortcut screen - has first precedence
@@ -1568,6 +1561,23 @@ export async function startApp(): Promise<void> {
         event.preventDefault();
         event.stopPropagation();
         return;
+      }
+
+      if (
+        conversation &&
+        commandOrCtrl &&
+        !shiftKey &&
+        (key === 'j' || key === 'J')
+      ) {
+        window.enterKeyboardMode();
+        const item: HTMLElement | null =
+          document.querySelector(
+            '.module-last-seen-indicator ~ div .module-message'
+          ) ||
+          document.querySelector(
+            '.module-timeline__last-message .module-message'
+          );
+        item?.focus();
       }
 
       // Open all media
@@ -2590,9 +2600,6 @@ export async function startApp(): Promise<void> {
     // Start listeners here, after we get through our queue.
     RotateSignedPreKeyListener.init(window.Whisper.events, newVersion);
 
-    // Go back to main process before processing delayed actions
-    await window.Signal.Data.goBackToMainProcess();
-
     profileKeyResponseQueue.start();
     lightSessionResetQueue.start();
     onDecryptionErrorQueue.start();
@@ -2632,17 +2639,6 @@ export async function startApp(): Promise<void> {
       });
 
       void routineProfileRefresher.start();
-    }
-
-    // Make sure we have the PNI identity
-
-    const pni = storage.user.getCheckedUuid(UUIDKind.PNI);
-    const pniIdentity = await storage.protocol.getIdentityKeyPair(pni);
-    if (!pniIdentity) {
-      log.info('Requesting PNI identity sync');
-      await singleProtoJobQueue.add(
-        MessageSender.getRequestPniIdentitySyncMessage()
-      );
     }
   }
 

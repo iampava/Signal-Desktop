@@ -12,6 +12,7 @@ import {
   without,
 } from 'lodash';
 
+import { clipboard } from 'electron';
 import type { ReadonlyDeep } from 'type-fest';
 import type { AttachmentType } from '../../types/Attachment';
 import type { StateType as RootStateType } from '../reducer';
@@ -159,6 +160,7 @@ import {
 } from './composer';
 import { ReceiptType } from '../../types/Receipt';
 import { sortByMessageOrder } from '../../util/maybeForwardMessages';
+import { Sound, SoundType } from '../../util/Sound';
 
 // State
 
@@ -183,7 +185,7 @@ export type MessageType = MessageAttributesType & {
 // eslint-disable-next-line local-rules/type-alias-readonlydeep
 export type MessageWithUIFieldsType = MessageAttributesType & {
   displayLimit?: number;
-  isSpoilerExpanded?: boolean;
+  isSpoilerExpanded?: Record<number, boolean>;
 };
 
 export const ConversationTypes = ['direct', 'group'] as const;
@@ -735,6 +737,7 @@ export type ShowSpoilerActionType = ReadonlyDeep<{
   type: typeof SHOW_SPOILER;
   payload: {
     id: string;
+    data: Record<number, boolean>;
   };
 }>;
 
@@ -1048,6 +1051,7 @@ export const actions = {
   repairOldestMessage,
   replaceAvatar,
   resetAllChatColors,
+  copyMessageText,
   retryDeleteForEveryone,
   retryMessageSend,
   reviewGroupMemberNameCollision,
@@ -2170,6 +2174,25 @@ function retryMessageSend(
   };
 }
 
+export function copyMessageText(
+  messageId: string
+): ThunkAction<void, RootStateType, unknown, NoopActionType> {
+  return async dispatch => {
+    const message = await getMessageById(messageId);
+    if (!message) {
+      throw new Error(`copy: Message ${messageId} missing!`);
+    }
+
+    const body = message.getNotificationText();
+    clipboard.writeText(body);
+
+    dispatch({
+      type: 'NOOP',
+      payload: null,
+    });
+  };
+}
+
 export function retryDeleteForEveryone(
   messageId: string
 ): ThunkAction<void, RootStateType, unknown, NoopActionType> {
@@ -2718,11 +2741,15 @@ function messageExpanded(
     },
   };
 }
-function showSpoiler(id: string): ShowSpoilerActionType {
+function showSpoiler(
+  id: string,
+  data: Record<number, boolean>
+): ShowSpoilerActionType {
   return {
     type: SHOW_SPOILER,
     payload: {
       id,
+      data,
     },
   };
 }
@@ -2748,16 +2775,30 @@ function messagesAdded({
   isJustSent: boolean;
   isNewMessage: boolean;
   messages: ReadonlyArray<MessageAttributesType>;
-}): MessagesAddedActionType {
-  return {
-    type: 'MESSAGES_ADDED',
-    payload: {
-      conversationId,
-      isActive,
-      isJustSent,
-      isNewMessage,
-      messages,
-    },
+}): ThunkAction<void, RootStateType, unknown, MessagesAddedActionType> {
+  return (dispatch, getState) => {
+    const state = getState();
+    if (
+      isNewMessage &&
+      state.items.audioMessage &&
+      conversationId === state.conversations.selectedConversationId &&
+      isActive &&
+      !isJustSent &&
+      messages.some(isIncoming)
+    ) {
+      drop(new Sound({ soundType: SoundType.Pop }).play());
+    }
+
+    dispatch({
+      type: 'MESSAGES_ADDED',
+      payload: {
+        conversationId,
+        isActive,
+        isJustSent,
+        isNewMessage,
+        messages,
+      },
+    });
   };
 }
 
@@ -4945,7 +4986,7 @@ export function reducer(
     };
   }
   if (action.type === SHOW_SPOILER) {
-    const { id } = action.payload;
+    const { id, data } = action.payload;
 
     const existingMessage = state.messagesLookup[id];
     if (!existingMessage) {
@@ -4954,7 +4995,7 @@ export function reducer(
 
     const updatedMessage = {
       ...existingMessage,
-      isSpoilerExpanded: true,
+      isSpoilerExpanded: data,
     };
 
     return {

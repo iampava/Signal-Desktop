@@ -1452,6 +1452,7 @@ export class ConversationModel extends window.Backbone
       this.set({
         removalStage: 'messageRequest',
       });
+      await this.maybeClearContactRemoved();
       window.Signal.Data.updateConversation(this.attributes);
     }
 
@@ -3409,7 +3410,6 @@ export class ConversationModel extends window.Backbone
       default:
         throw missingCaseError(callHistoryDetails);
     }
-
     // This is sometimes called inside of another conversation queue job so if
     // awaited it would block on this forever.
     drop(
@@ -3466,9 +3466,12 @@ export class ConversationModel extends window.Backbone
 
         this.trigger('newmessage', model);
         void this.updateUnread();
+        this.set('active_at', timestamp);
 
         if (canConversationBeUnarchived(this.attributes)) {
           this.setArchived(false);
+        } else {
+          window.Signal.Data.updateConversation(this.attributes);
         }
       })
     );
@@ -4161,6 +4164,7 @@ export class ConversationModel extends window.Backbone
             draftTimestamp: null,
             quotedMessageId: undefined,
             lastMessageAuthor: message.getAuthorText(),
+            lastMessageBodyRanges: message.get('bodyRanges'),
             lastMessage: message.getNotificationText(),
             lastMessageStatus: 'sending' as const,
           };
@@ -5543,9 +5547,9 @@ export class ConversationModel extends window.Backbone
         });
 
     let notificationIconUrl;
-    const avatar = this.get('avatar') || this.get('profileAvatar');
-    if (avatar && avatar.path) {
-      notificationIconUrl = getAbsoluteAttachmentPath(avatar.path);
+    const avatarPath = this.getAvatarPath();
+    if (avatarPath) {
+      notificationIconUrl = getAbsoluteAttachmentPath(avatarPath);
     } else if (isMessageInDirectConversation) {
       notificationIconUrl = await this.getIdenticon();
     } else {
